@@ -46,7 +46,6 @@ func ScanIP(ip string, pr PortRange, timeout time.Duration) []int {
 	return result
 }
 
-//
 //func ScanIpRange(ipr IpRange, pr PortRange, rCh chan Result) {
 //	DoIpRange(ipr, func(ip net.IP) {
 //		for _, p := range ScanIP(ip.String(), pr, ipr.Timeout) {
