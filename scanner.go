@@ -47,29 +47,33 @@ func ScanIP(ip string, pr PortRange, timeout time.Duration) []int {
 }
 
 //func ScanIpRange(ipr IpRange, pr PortRange, rCh chan Result) {
-//	DoIpRange(ipr, func(ip net.IP) {
+//	Each(ipr, func(ip net.IP) {
 //		for _, p := range ScanIP(ip.String(), pr, ipr.Timeout) {
 //			rCh <- Result{ip, p}
 //		}
 //	})
 //}
 
-func DoIpRange(ipr IpRange, fn func(ip net.IP)) {
+func Each(ipr IpRange, fn func(ip net.IP)) {
 	wg := &sync.WaitGroup{}
 
-	sl := binary.BigEndian.Uint32(net.ParseIP(ipr.Start).To4())
-	el := binary.BigEndian.Uint32(net.ParseIP(ipr.End).To4())
+	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.Start).To4()))
+	el := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.End).To4()))
 
-	step := (el - sl) / uint32(ipr.Workers)
+	step := (el - sl) / uint64(ipr.Workers)
 
-	for min := sl; min <= el-step; min += step {
+	for min := sl - 1; min < el; min += step {
 		max := min + step
+		if max > el {
+			max = el
+		}
 
 		wg.Add(1)
-		go func(min, max uint32) {
+		go func(min, max uint64) {
 			for l := min; l <= max; l++ {
 				b := make([]byte, 4)
-				binary.BigEndian.PutUint32(b, l)
+				binary.BigEndian.PutUint32(b, uint32(l))
+
 				fn(net.IP(b).To4())
 			}
 
@@ -84,6 +88,31 @@ func CheckPort(ip string, port int, timeout time.Duration) bool {
 	_, err := net.DialTimeout(`tcp`, ip+`:`+strconv.Itoa(port), timeout)
 	if err != nil {
 		return false
+	}
+
+	return true
+}
+
+func ExternalIP(ip net.IP) bool {
+	if !ip.IsGlobalUnicast() {
+		return false
+	}
+
+	if ip4 := ip.To4(); ip4 != nil {
+		switch {
+		case ip4[0] == 10:
+			return false
+		case ip4[0] == 127:
+			return false
+		case ip4[0] == 240: // reserved
+			return false
+		case ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31:
+			return false
+		case ip4[0] == 192 && ip4[1] == 168:
+			return false
+		case ip4[0] == 169 && ip4[1] == 254:
+			return false
+		}
 	}
 
 	return true
