@@ -13,6 +13,10 @@ type IpRange struct {
 	Start   string
 	End     string
 	Workers int
+
+	State []uint64
+	Count uint64
+	Done  uint64
 }
 
 type PortRange struct {
@@ -24,6 +28,53 @@ type PortRange struct {
 type Result struct {
 	IP   net.IP
 	Port int
+}
+
+func (ipr *IpRange) Each(fn func(ip net.IP)) {
+	wg := &sync.WaitGroup{}
+
+	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.Start).To4()))
+	el := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.End).To4()))
+
+	step := (el - sl) / uint64(ipr.Workers)
+
+	ipr.Count = el - sl
+
+	var w int
+	for min := sl - 1; min < el; min += step {
+		max := min + step
+		if max > el {
+			max = el
+		}
+
+		if len(ipr.State) <= w {
+			ipr.State = append(ipr.State, 0)
+		}
+
+		wg.Add(1)
+		go func(min, max uint64, w int) {
+			if ipr.State[w] > 0 {
+				min = ipr.State[w]
+			}
+
+			for l := min; l <= max; l++ {
+				ipr.State[w] = l
+
+				b := make([]byte, 4)
+				binary.BigEndian.PutUint32(b, uint32(l))
+
+				fn(net.IP(b).To4())
+
+				ipr.Done++
+			}
+
+			wg.Done()
+		}(min, max, w)
+
+		w++
+	}
+
+	wg.Wait()
 }
 
 func ScanIP(ip string, pr PortRange, timeout time.Duration) []int {
@@ -44,44 +95,6 @@ func ScanIP(ip string, pr PortRange, timeout time.Duration) []int {
 	}
 
 	return result
-}
-
-//func ScanIpRange(ipr IpRange, pr PortRange, rCh chan Result) {
-//	Each(ipr, func(ip net.IP) {
-//		for _, p := range ScanIP(ip.String(), pr, ipr.Timeout) {
-//			rCh <- Result{ip, p}
-//		}
-//	})
-//}
-
-func Each(ipr IpRange, fn func(ip net.IP)) {
-	wg := &sync.WaitGroup{}
-
-	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.Start).To4()))
-	el := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.End).To4()))
-
-	step := (el - sl) / uint64(ipr.Workers)
-
-	for min := sl - 1; min < el; min += step {
-		max := min + step
-		if max > el {
-			max = el
-		}
-
-		wg.Add(1)
-		go func(min, max uint64) {
-			for l := min; l <= max; l++ {
-				b := make([]byte, 4)
-				binary.BigEndian.PutUint32(b, uint32(l))
-
-				fn(net.IP(b).To4())
-			}
-
-			wg.Done()
-		}(min, max)
-	}
-
-	wg.Wait()
 }
 
 func CheckPort(ip string, port int, timeout time.Duration) bool {
