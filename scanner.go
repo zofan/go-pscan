@@ -2,8 +2,11 @@ package pscan
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"io/ioutil"
 	"math"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -30,7 +33,7 @@ type Result struct {
 	Port int
 }
 
-func (ipr *IpRange) Each(fn func(ip net.IP)) {
+func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 	wg := &sync.WaitGroup{}
 
 	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.Start).To4()))
@@ -54,16 +57,18 @@ func (ipr *IpRange) Each(fn func(ip net.IP)) {
 		wg.Add(1)
 		go func(min, max uint64, w int) {
 			if ipr.State[w] > 0 {
+				ipr.Done += ipr.State[w] - min
 				min = ipr.State[w]
 			}
 
 			for l := min; l <= max; l++ {
-				ipr.State[w] = l
 
 				b := make([]byte, 4)
 				binary.BigEndian.PutUint32(b, uint32(l))
 
-				fn(net.IP(b).To4())
+				if fn(net.IP(b).To4()) {
+					ipr.State[w] = l
+				}
 
 				ipr.Done++
 			}
@@ -75,6 +80,28 @@ func (ipr *IpRange) Each(fn func(ip net.IP)) {
 	}
 
 	wg.Wait()
+}
+
+func (ipr *IpRange) SaveState(file string) error {
+	raw, err := json.Marshal(ipr.State)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(file, raw, 0666)
+}
+
+func (ipr *IpRange) LoadState(file string) error {
+	raw, err := ioutil.ReadFile(file)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	return json.Unmarshal(raw, &ipr.State)
 }
 
 func ScanIP(ip string, pr PortRange, timeout time.Duration) []int {
