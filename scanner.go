@@ -88,7 +88,7 @@ func (ipr *IpRange) SaveState(file string) error {
 		return err
 	}
 
-	return ioutil.WriteFile(file, raw, 0666)
+	return ioutil.WriteFile(file, raw, 0664)
 }
 
 func (ipr *IpRange) LoadState(file string) error {
