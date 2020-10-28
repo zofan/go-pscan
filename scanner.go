@@ -17,9 +17,11 @@ type IpRange struct {
 	End     string
 	Workers int
 
-	State []uint64
+	State map[int]uint64
 	Count uint64
 	Done  uint64
+
+	mu sync.Mutex
 }
 
 type PortRange struct {
@@ -43,6 +45,10 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 
 	ipr.Count = el - sl
 
+	if len(ipr.State) == 0 {
+		ipr.State = make(map[int]uint64)
+	}
+
 	var w int
 	for min := sl - 1; min < el; min += step {
 		max := min + step
@@ -50,27 +56,28 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 			max = el
 		}
 
-		if len(ipr.State) <= w {
-			ipr.State = append(ipr.State, 0)
-		}
-
 		wg.Add(1)
 		go func(min, max uint64, w int) {
-			if ipr.State[w] > 0 {
-				ipr.Done += ipr.State[w] - min
-				min = ipr.State[w]
+			ipr.mu.Lock()
+			if state, ok := ipr.State[w]; ok {
+				ipr.Done += state - min
+				min = state
 			}
+			ipr.mu.Unlock()
 
 			for l := min; l <= max; l++ {
-
 				b := make([]byte, 4)
 				binary.BigEndian.PutUint32(b, uint32(l))
 
 				if fn(net.IP(b).To4()) {
+					ipr.mu.Lock()
 					ipr.State[w] = l
+					ipr.mu.Unlock()
 				}
 
+				ipr.mu.Lock()
 				ipr.Done++
+				ipr.mu.Unlock()
 			}
 
 			wg.Done()
@@ -83,6 +90,9 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 }
 
 func (ipr *IpRange) SaveState(file string) error {
+	ipr.mu.Lock()
+	defer ipr.mu.Unlock()
+
 	raw, err := json.Marshal(ipr.State)
 	if err != nil {
 		return err
