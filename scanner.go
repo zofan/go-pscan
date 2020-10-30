@@ -17,11 +17,17 @@ type IpRange struct {
 	End     string
 	Workers int
 
-	State map[int]uint64
+	State map[string]*State
 	Count uint64
 	Done  uint64
 
 	mu sync.Mutex
+}
+
+type State struct {
+	Min     uint64
+	Max     uint64
+	Current uint64
 }
 
 type PortRange struct {
@@ -42,11 +48,9 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 	el := uint64(binary.BigEndian.Uint32(net.ParseIP(ipr.End).To4()))
 
 	step := (el - sl) / uint64(ipr.Workers)
-
 	ipr.Count = el - sl
-
 	if len(ipr.State) == 0 {
-		ipr.State = make(map[int]uint64)
+		ipr.State = make(map[string]*State)
 	}
 
 	var w int
@@ -56,13 +60,25 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 			max = el
 		}
 
-		wg.Add(1)
-		go func(min, max uint64, w int) {
-			ipr.mu.Lock()
-			if state, ok := ipr.State[w]; ok {
-				ipr.Done += state - min
-				min = state
+		ipr.mu.Lock()
+		sk := stateKey(min, max)
+		s, ok := ipr.State[sk]
+		if !ok {
+			s = &State{
+				Min: min,
+				Max: max,
 			}
+			ipr.State[sk] = s
+		}
+		ipr.mu.Unlock()
+
+		wg.Add(1)
+		go func(s *State, w int) {
+			ipr.mu.Lock()
+			ipr.Done += s.Current - s.Min
+			sk := stateKey(s.Min, s.Max)
+			min := s.Min
+			max := s.Max
 			ipr.mu.Unlock()
 
 			for l := min; l <= max; l++ {
@@ -71,7 +87,7 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 
 				if fn(net.IP(b).To4()) {
 					ipr.mu.Lock()
-					ipr.State[w] = l
+					ipr.State[sk].Current = l
 					ipr.mu.Unlock()
 				}
 
@@ -81,7 +97,7 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 			}
 
 			wg.Done()
-		}(min, max, w)
+		}(s, w)
 
 		w++
 	}
@@ -166,4 +182,8 @@ func ExternalIP(ip net.IP) bool {
 	}
 
 	return true
+}
+
+func stateKey(min, max uint64) string {
+	return strconv.Itoa(int(min)) + `..` + strconv.Itoa(int(max))
 }
