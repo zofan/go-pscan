@@ -75,7 +75,9 @@ func (ipr *IpRange) Each(fn func(ip net.IP) bool) {
 		wg.Add(1)
 		go func(s *State, w int) {
 			ipr.mu.Lock()
-			ipr.Done += s.Current - s.Min
+			if s.Current > 0 {
+				ipr.Done += s.Current - s.Min
+			}
 			sk := stateKey(s.Min, s.Max)
 			min := s.Min
 			max := s.Max
