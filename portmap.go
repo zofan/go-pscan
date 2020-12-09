@@ -1,4 +1,4 @@
-package pscan
+package ipscan
 
 var (
 	PortMap = map[uint16]string{

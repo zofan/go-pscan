@@ -1,4 +1,4 @@
-package pscan
+package ipscan
 
 import (
 	"encoding/binary"

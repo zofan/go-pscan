@@ -1,4 +1,4 @@
-package pscan
+package ipscan
 
 import (
 	"encoding/binary"
@@ -10,22 +10,53 @@ import (
 )
 
 type Scanner struct {
-	MinIP    string
-	MaxIP    string
-	Parallel int
+	MinIP   string
+	MaxIP   string
+	Threads uint64
 
 	Metric struct {
 		Count uint64
 		Done  uint64
 	}
 
-	workers []*Worker
+	Workers []*Worker
 
 	mu sync.Mutex
 	wg *sync.WaitGroup
 }
 
-func (s *Scanner) Spawn(min, max uint64) {
+func NewScanner(minIP, maxIP string, threads uint64) *Scanner {
+	s := &Scanner{
+		MinIP:   minIP,
+		MaxIP:   maxIP,
+		Threads: threads,
+
+		wg: &sync.WaitGroup{},
+	}
+
+	s.addWorkers()
+
+	return s
+}
+
+func (s *Scanner) addWorkers() {
+	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(s.MinIP).To4()))
+	el := uint64(binary.BigEndian.Uint32(net.ParseIP(s.MaxIP).To4()))
+
+	step := (el - sl) / s.Threads
+	s.Metric.Count = el - sl
+
+	for min := sl - 1; min < el; min += step {
+		max := min + step
+		if max > el {
+			max = el
+		}
+
+		s.addWorker(min, max)
+	}
+}
+
+func (s *Scanner) addWorker(min, max uint64) {
 	w := &Worker{
 		MinLong: min,
 		MaxLong: max,
@@ -33,33 +64,18 @@ func (s *Scanner) Spawn(min, max uint64) {
 		OkLong:  min,
 	}
 
-	s.workers = append(s.workers, w)
-	s.wg.Add(1)
+	s.Workers = append(s.Workers, w)
 }
 
 func (s *Scanner) Each(fn func(ip net.IP) bool) {
-	s.wg = &sync.WaitGroup{}
-
-	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(s.MinIP).To4()))
-	el := uint64(binary.BigEndian.Uint32(net.ParseIP(s.MaxIP).To4()))
-
-	step := (el - sl) / uint64(s.Parallel)
-	s.Metric.Count = el - sl
-
-	var wn int
-	for min := sl - 1; min < el; min += step {
-		max := min + step
-		if max > el {
-			max = el
-		}
+	for _, w := range s.Workers {
+		s.wg.Add(1)
 
 		go func(s *Scanner, w *Worker) {
 			w.Each(fn)
 
 			s.wg.Done()
-		}(s, s.workers[wn])
-
-		wn++
+		}(s, w)
 	}
 
 	s.wg.Wait()
@@ -68,18 +84,18 @@ func (s *Scanner) Each(fn func(ip net.IP) bool) {
 func (s *Scanner) SendSignal(signal WorkerSignal) {
 	s.mu.Lock()
 
-	for _, s := range s.workers {
-		s.Signal = signal
+	for _, w := range s.Workers {
+		w.Signal = signal
 	}
 
 	s.mu.Unlock()
 }
 
-func (s *Scanner) SaveWorkers(file string) error {
+func (s *Scanner) Save(file string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	raw, err := json.Marshal(s.workers)
+	raw, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
@@ -87,7 +103,7 @@ func (s *Scanner) SaveWorkers(file string) error {
 	return ioutil.WriteFile(file, raw, 0664)
 }
 
-func (s *Scanner) LoadWorkers(file string) error {
+func (s *Scanner) Load(file string) error {
 	raw, err := ioutil.ReadFile(file)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -97,5 +113,5 @@ func (s *Scanner) LoadWorkers(file string) error {
 		return err
 	}
 
-	return json.Unmarshal(raw, &s.workers)
+	return json.Unmarshal(raw, &s)
 }
