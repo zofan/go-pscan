@@ -1,6 +1,7 @@
 package ipscan
 
 import (
+	"encoding/binary"
 	"net"
 	"strconv"
 	"time"
@@ -39,4 +40,11 @@ func IsExternalIP4(ip net.IP) bool {
 	}
 
 	return true
+}
+
+func LongToIP4(n uint32) net.IP {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, n)
+
+	return net.IP(b).To4()
 }

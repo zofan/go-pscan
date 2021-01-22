@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io/ioutil"
+	"math"
 	"net"
 	"os"
 	"sync"
@@ -43,11 +44,12 @@ func (s *Scanner) addWorkers() {
 	sl := uint64(binary.BigEndian.Uint32(net.ParseIP(s.MinIP).To4()))
 	el := uint64(binary.BigEndian.Uint32(net.ParseIP(s.MaxIP).To4()))
 
-	step := (el - sl) / s.Threads
+	var step = math.Ceil(float64(el-sl) / float64(s.Threads))
+	stepInt := uint64(step)
 	s.Metric.Count = el - sl
 
-	for min := sl - 1; min < el; min += step {
-		max := min + step
+	for min := sl; min < el; min += stepInt {
+		max := min + stepInt
 		if max > el {
 			max = el
 		}
@@ -91,7 +93,7 @@ func (s *Scanner) SendSignal(signal WorkerSignal) {
 	s.mu.Unlock()
 }
 
-func (s *Scanner) Save(file string) error {
+func (s *Scanner) SaveFile(file string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -103,7 +105,7 @@ func (s *Scanner) Save(file string) error {
 	return ioutil.WriteFile(file, raw, 0664)
 }
 
-func (s *Scanner) Load(file string) error {
+func (s *Scanner) LoadFile(file string) error {
 	raw, err := ioutil.ReadFile(file)
 	if err != nil {
 		if os.IsNotExist(err) {

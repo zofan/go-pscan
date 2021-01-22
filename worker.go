@@ -25,6 +25,8 @@ type Worker struct {
 }
 
 func (w *Worker) Each(fn func(ip net.IP) bool) {
+	w.Signal = ``
+
 	for l := w.CurLong; l <= w.MaxLong; l++ {
 		switch w.Signal {
 		case SignalStop:
